@@ -1,7 +1,5 @@
 # configure.cli — WildFly 30 full
-# Versión estable para validar arranque del contenedor, datasources y mail
-# La parte del resource-adapter RabbitMQ se deja comentada temporalmente
-# hasta confirmar el nombre exacto del .rar y sus clases/config-property reales.
+# Usa ActiveMQ Artemis incorporado para JMS (sin RAR externo)
 
 embed-server --server-config=standalone-full.xml --std-out=echo
 
@@ -62,7 +60,6 @@ data-source add \
 # =========================
 # Mail
 # =========================
-# mail-smtp ya existe en standalone-full.xml, por eso solo se actualizan atributos
 /socket-binding-group=standard-sockets/remote-destination-outbound-socket-binding=mail-smtp:write-attribute(name=host, value=smtp.gmail.com)
 /socket-binding-group=standard-sockets/remote-destination-outbound-socket-binding=mail-smtp:write-attribute(name=port, value=587)
 
@@ -79,23 +76,24 @@ data-source add \
 /subsystem=ejb3/strict-max-bean-instance-pool=mdb-strict-max-pool:write-attribute(name=max-pool-size, value=20)
 
 # =========================
-# RabbitMQ resource adapter
+# JMS: Cola EvaluationResults via Artemis incorporado
+# ─────────────────────────────────────────────────
+# En lugar de usar un RAR externo incompatible con Jakarta EE 10,
+# usamos el ActiveMQ Artemis que WildFly ya incluye.
+# El SagaOrchestrator publica en java:/jms/RabbitCF →
+# Artemis recibe el mensaje → EmailConsumerMDB lo consume.
 # =========================
-# TEMPORALMENTE DESACTIVADO
-# Este bloque se reactivará cuando confirmemos:
-# 1) nombre exacto del .rar desplegado
-# 2) class-name correcto del connection-definition
-# 3) config-property reales que soporta ese RAR
-#
-# Ejemplo conceptual (NO ACTIVAR AÚN):
-#
-# /subsystem=resource-adapters/resource-adapter=resource-adapter.rar:add(archive=resource-adapter.rar, transaction-support=NoTransaction)
-# /subsystem=resource-adapters/resource-adapter=resource-adapter.rar/connection-definitions=RabbitCF:add(\
-#     class-name=<CLASE_REAL_DEL_RAR>,\
-#     jndi-name=java:/jms/RabbitCF,\
-#     enabled=true,\
-#     use-java-context=true,\
-#     pool-name=RabbitCF\
-# )
 
+# Cola JMS — bound a java:/jms/queue/EvaluationResults
+/subsystem=messaging-activemq/server=default/jms-queue=EvaluationResults:add(\
+    entries=["java:/jms/queue/EvaluationResults"]\
+)
+
+# ConnectionFactory — bound a java:/jms/RabbitCF
+# (alias del ConnectionFactory interno de Artemis)
+/subsystem=messaging-activemq/server=default/connection-factory=RabbitCF:add(\
+    connectors=["http-connector"],\
+    entries=["java:/jms/RabbitCF"]\
+)
+/subsystem=messaging-activemq/server=default:write-attribute(name=security-enabled, value=false)
 stop-embedded-server

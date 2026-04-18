@@ -1,7 +1,6 @@
 # ============================================================
-#  Dockerfile.wildfly — WildFly 30 + RabbitMQ + MDB (Scenario A)
-#  Usa un resource adapter AMQP 1.0 para que WildFly pueda
-#  levantar Message-Driven Beans contra RabbitMQ.
+#  Dockerfile.wildfly — VERSIÓN CORREGIDA
+#  Sin RAR externo — usa ActiveMQ Artemis incorporado en WildFly
 # ============================================================
 
 FROM maven:3.9.6-eclipse-temurin-17 AS builder
@@ -18,12 +17,6 @@ RUN mvn clean package -DskipTests --no-transfer-progress
 RUN mvn dependency:copy \
       -Dartifact=org.postgresql:postgresql:42.7.3:jar \
       -DoutputDirectory=/build/drivers \
-      --no-transfer-progress
-
-# Resource adapter AMQP 1.0 (RAR) para WildFly
-RUN mvn dependency:copy \
-      -Dartifact=org.amqphub.jca:resource-adapter:2.0.0:rar \
-      -DoutputDirectory=/build/rar \
       --no-transfer-progress
 
 # module.xml para PostgreSQL
@@ -46,11 +39,6 @@ COPY --from=builder --chown=jboss:root /build/pg-module/ \
 COPY --from=builder --chown=jboss:root \
      /build/target/taller-distribuido.war \
      /opt/jboss/wildfly/standalone/deployments/taller-distribuido.war
-
-# RAR del resource adapter para MDB/JMS sobre RabbitMQ (AMQP 1.0)
-COPY --from=builder --chown=jboss:root \
-     /build/rar/resource-adapter-2.0.0.rar \
-     /opt/jboss/wildfly/standalone/deployments/resource-adapter.rar
 
 COPY --chown=jboss:root wildfly-config/configure.cli \
      /opt/jboss/wildfly/configure.cli
