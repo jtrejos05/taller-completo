@@ -1,0 +1,14 @@
+co\universidad\taller\rest\TallerApplication.class
+co\universidad\taller\mdb\EmailConsumerMDB.class
+co\universidad\taller\model\ExamSubmission.class
+co\universidad\taller\model\Entities\SagaExecution$SagaEstado.class
+co\universidad\taller\model\Entities\SagaExecution.class
+co\universidad\taller\model\Entities\Grade.class
+co\universidad\taller\model\EvaluacionPayload.class
+co\universidad\taller\service\EstudianteService$EstudianteInfo.class
+co\universidad\taller\model\Entities\Student.class
+co\universidad\taller\saga\SagaException.class
+co\universidad\taller\service\EmailService.class
+co\universidad\taller\saga\SagaOrchestrator.class
+co\universidad\taller\service\EstudianteService.class
+co\universidad\taller\rest\EvaluacionResource.class

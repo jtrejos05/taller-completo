@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<persistence xmlns="https://jakarta.ee/xml/ns/persistence"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xsi:schemaLocation="https://jakarta.ee/xml/ns/persistence
+                                 https://jakarta.ee/xml/ns/persistence/persistence_3_0.xsd"
+             version="3.0">
+
+    <!--
+    ════════════════════════════════════════════════════════════════
+     persistence.xml — Configuración JPA para las dos bases de datos
+     Ubicación: src/main/resources/META-INF/persistence.xml
+
+     WildFly usa Hibernate 6 como proveedor JPA por defecto.
+     No es necesario declarar el proveedor explícitamente.
+
+     CRÍTICO — Por qué hay DOS persistence units:
+     Cada base de datos (exam_db y student_db) tiene su propio
+     datasource JNDI y su propio EntityManager. JPA no soporta
+     JOINs entre persistence units diferentes; las referencias
+     cross-BD son LÓGICAS (solo UUID, sin FK real).
+    ════════════════════════════════════════════════════════════════
+    -->
+
+    <!--
+    ────────────────────────────────────────────────────────────────
+     EXAM PU — Mapea a exam_db (PostgreSQL :5432)
+     Datasource JNDI: java:/ExamDS
+     Entidades: ExamSubmission, SagaExecution
+    ────────────────────────────────────────────────────────────────
+    -->
+    <persistence-unit name="ExamPU" transaction-type="JTA">
+        <!--
+         transaction-type="JTA": WildFly gestiona las transacciones.
+         Con @TransactionAttribute(REQUIRES_NEW) en el EJB, el
+         contenedor hace begin/commit/rollback automáticamente.
+        -->
+
+        <!--
+         jta-data-source: nombre JNDI del datasource configurado en
+         standalone.xml bajo <subsystem xmlns="urn:jboss:domain:datasources:...">
+         Como datasource con driver PostgreSQL JDBC.
+        -->
+        <jta-data-source>java:/ExamDS</jta-data-source>
+
+        <!-- Clases de entidad mapeadas a exam_db -->
+        <class>co.universidad.taller.model.ExamSubmission</class>
+        <class>co.universidad.taller.model.Entities.SagaExecution</class>
+
+        <properties>
+            <!--
+             DDL automático: "validate" en producción (no modifica el schema).
+             "create-drop" solo para desarrollo/tests.
+             Opciones: none | validate | update | create | create-drop
+            -->
+            <property name="jakarta.persistence.schema-generation.database.action"
+                      value="validate"/>
+
+            <!--
+             Dialecto de Hibernate para PostgreSQL 15.
+             Habilita soporte nativo para JSONB, UUID, arrays de PostgreSQL.
+            -->
+            <property name="hibernate.dialect"
+                      value="org.hibernate.dialect.PostgreSQLDialect"/>
+
+            <!--
+             Mostrar SQL generado en consola (útil para debug del taller).
+             Desactivar en producción: value="false"
+            -->
+            <property name="hibernate.show_sql" value="true"/>
+            <property name="hibernate.format_sql" value="true"/>
+
+            <!--
+             Second-level cache: desactivado para el taller.
+             En producción: usar Infinispan (WildFly lo incluye).
+            -->
+            <property name="hibernate.cache.use_second_level_cache" value="false"/>
+
+            <!--
+             Batch inserts: agrupa múltiples INSERT en una sola llamada JDBC.
+             Mejora rendimiento en operaciones masivas.
+            -->
+            <property name="hibernate.jdbc.batch_size" value="25"/>
+        </properties>
+    </persistence-unit>
+
+    <!--
+    ────────────────────────────────────────────────────────────────
+     STUDENT PU — Mapea a student_db (PostgreSQL :5433)
+     Datasource JNDI: java:/StudentDS
+     Entidades: Student, Grade
+    ────────────────────────────────────────────────────────────────
+    -->
+    <persistence-unit name="StudentPU" transaction-type="JTA">
+
+        <jta-data-source>java:/StudentDS</jta-data-source>
+
+        <class>co.universidad.taller.model.Entities.Student</class>
+        <class>co.universidad.taller.model.Entities.Grade</class>
+
+        <properties>
+            <property name="jakarta.persistence.schema-generation.database.action"
+                      value="validate"/>
+            <property name="hibernate.dialect"
+                      value="org.hibernate.dialect.PostgreSQLDialect"/>
+            <property name="hibernate.show_sql" value="true"/>
+            <property name="hibernate.format_sql" value="true"/>
+            <property name="hibernate.cache.use_second_level_cache" value="false"/>
+            <property name="hibernate.jdbc.batch_size" value="25"/>
+        </properties>
+    </persistence-unit>
+
+</persistence>

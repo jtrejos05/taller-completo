@@ -1,0 +1,256 @@
+<!--
+═══════════════════════════════════════════════════════════════════════
+ standalone.xml — Configuración de WildFly 30 para el taller
+ Ubicación en el servidor: $JBOSS_HOME/standalone/configuration/standalone.xml
+
+ Este archivo configura los 4 recursos externos que el taller necesita:
+   1. Datasource ExamDS     → exam_db    (PostgreSQL :5432)
+   2. Datasource StudentDS  → student_db (PostgreSQL :5433)
+   3. Mail session          → SMTP Gmail (puerto 587 con TLS)
+   4. Resource-adapter AMQP → RabbitMQ   (puerto 5672)
+
+ Solo se muestran los subsistemas relevantes para el taller.
+ El standalone.xml completo de WildFly contiene ~2000 líneas adicionales
+ de configuración de subsistemas que no se modifican.
+═══════════════════════════════════════════════════════════════════════
+-->
+
+<server xmlns="urn:jboss:domain:20.0">
+
+    <extensions><!-- ... extensiones estándar de WildFly ... --></extensions>
+
+    <system-properties>
+        <!-- Variables de entorno para no hardcodear credenciales en XML -->
+        <!-- En Docker se definen en docker-compose.yml bajo environment: -->
+        <property name="exam.db.host"     value="${env.EXAM_DB_HOST:exam_db}"/>
+        <property name="student.db.host"  value="${env.STUDENT_DB_HOST:student_db}"/>
+        <property name="rabbit.host"      value="${env.RABBIT_HOST:rabbitmq}"/>
+        <property name="smtp.password"    value="${env.SMTP_APP_PASSWORD:changeme}"/>
+    </system-properties>
+
+    <profile>
+
+        <!-- ══════════════════════════════════════════════════════
+             DATASOURCES — Capa de Datos
+             Driver: PostgreSQL JDBC 42.x (copiado en modules/postgresql/)
+             ══════════════════════════════════════════════════════ -->
+        <subsystem xmlns="urn:jboss:domain:datasources:6.0">
+            <datasources>
+
+                <!--
+                 ExamDS — Base de datos de exámenes (exam_db :5432)
+                 JNDI: java:/ExamDS
+                 Usado por: SagaOrchestrator (ExamPU), EstudianteService no
+                -->
+                <datasource jndi-name="java:/ExamDS"
+                            pool-name="ExamDS"
+                            enabled="true"
+                            use-java-context="true">
+                    <!--
+                     URL de conexión JDBC.
+                     ${exam.db.host} se resuelve desde la system-property
+                     definida arriba, que a su vez lee la variable de entorno
+                     EXAM_DB_HOST definida en docker-compose.yml
+                    -->
+                    <connection-url>
+                        jdbc:postgresql://${exam.db.host}:5432/exam_db
+                    </connection-url>
+                    <driver>postgresql</driver>
+                    <security>
+                        <user-name>user</user-name>
+                        <password>password</password>
+                    </security>
+                    <!-- Pool de conexiones: mínimo 5, máximo 20 -->
+                    <pool>
+                        <min-pool-size>5</min-pool-size>
+                        <max-pool-size>20</max-pool-size>
+                        <prefill>true</prefill>
+                    </pool>
+                    <validation>
+                        <!-- Validar conexiones inactivas para detectar drops -->
+                        <validate-on-match>false</validate-on-match>
+                        <background-validation>true</background-validation>
+                        <background-validation-millis>60000</background-validation-millis>
+                        <check-valid-connection-sql>SELECT 1</check-valid-connection-sql>
+                    </validation>
+                </datasource>
+
+                <!--
+                 StudentDS — Base de datos de estudiantes (student_db :5433)
+                 JNDI: java:/StudentDS
+                 Usado por: SagaOrchestrator (StudentPU), EstudianteService
+                -->
+                <datasource jndi-name="java:/StudentDS"
+                            pool-name="StudentDS"
+                            enabled="true"
+                            use-java-context="true">
+                    <connection-url>
+                        jdbc:postgresql://${student.db.host}:5433/student_db
+                    </connection-url>
+                    <driver>postgresql</driver>
+                    <security>
+                        <user-name>user</user-name>
+                        <password>password</password>
+                    </security>
+                    <pool>
+                        <min-pool-size>5</min-pool-size>
+                        <max-pool-size>20</max-pool-size>
+                    </pool>
+                    <validation>
+                        <background-validation>true</background-validation>
+                        <background-validation-millis>60000</background-validation-millis>
+                        <check-valid-connection-sql>SELECT 1</check-valid-connection-sql>
+                    </validation>
+                </datasource>
+
+                <!--
+                 Declaración del driver JDBC de PostgreSQL.
+                 El JAR debe estar en:
+                   $JBOSS_HOME/modules/system/layers/base/org/postgresql/main/
+                 con su module.xml correspondiente.
+                -->
+                <drivers>
+                    <driver name="postgresql" module="org.postgresql">
+                        <driver-class>org.postgresql.Driver</driver-class>
+                        <xa-datasource-class>org.postgresql.xa.PGXADataSource</xa-datasource-class>
+                    </driver>
+                </drivers>
+
+            </datasources>
+        </subsystem>
+
+        <!-- ══════════════════════════════════════════════════════
+             MAIL — Configuración SMTP para EmailService
+             Usado por: EmailService (@Resource java:jboss/mail/Default)
+             ══════════════════════════════════════════════════════ -->
+        <subsystem xmlns="urn:jboss:domain:mail:4.0">
+            <mail-session name="default" jndi-name="java:jboss/mail/Default">
+                <!--
+                 outbound-socket-binding-ref apunta al <outbound-socket-binding>
+                 definido en <socket-binding-group> más abajo.
+                 tls="true": STARTTLS en el puerto 587 (recomendado sobre SSL/465)
+                 Las credenciales se inyectan desde system-properties → env vars.
+                -->
+                <smtp-server outbound-socket-binding-ref="mail-smtp"
+                             ssl="false"
+                             tls="true"
+                             username="sistema@universidad.edu.co"
+                             password="${smtp.password}"/>
+            </mail-session>
+        </subsystem>
+
+        <!-- ══════════════════════════════════════════════════════
+             RESOURCE ADAPTERS — RabbitMQ vía AMQP
+             Permite a los MDBs (EmailConsumerMDB, DeviceNotifierMDB)
+             conectarse a RabbitMQ usando la API JMS estándar.
+
+             El RAR (Resource Adapter Archive) de RabbitMQ/ActiveMQ
+             debe copiarse en:
+               $JBOSS_HOME/standalone/deployments/rabbitmq-jms.rar
+             ══════════════════════════════════════════════════════ -->
+        <subsystem xmlns="urn:jboss:domain:resource-adapters:6.1">
+            <resource-adapters>
+                <resource-adapter id="rabbitmq-jms">
+                    <!-- Archivo RAR desplegado en deployments/ -->
+                    <archive>rabbitmq-jms.rar</archive>
+                    <transaction-support>NoTransaction</transaction-support>
+                    <!--
+                     NoTransaction: RabbitMQ no participa en transacciones JTA.
+                     Los mensajes se confirman (ACK) cuando el MDB retorna
+                     normalmente, de acuerdo con Auto-acknowledge.
+                    -->
+
+                    <connection-definitions>
+                        <!--
+                         ConnectionFactory JMS inyectada en SagaOrchestrator:
+                           @Resource(lookup="java:/jms/RabbitCF")
+                           private ConnectionFactory rabbitCF;
+                        -->
+                        <connection-definition
+                            class-name="com.rabbitmq.jms.admin.RMQConnectionFactory"
+                            jndi-name="java:/jms/RabbitCF"
+                            pool-name="RabbitCF"
+                            enabled="true"
+                            use-java-context="true">
+                            <config-property name="Host">${rabbit.host}</config-property>
+                            <config-property name="Port">5672</config-property>
+                            <config-property name="Username">guest</config-property>
+                            <config-property name="Password">guest</config-property>
+                            <pool>
+                                <min-pool-size>2</min-pool-size>
+                                <max-pool-size>10</max-pool-size>
+                            </pool>
+                        </connection-definition>
+                    </connection-definitions>
+
+                    <admin-objects>
+                        <!--
+                         Queue JMS inyectada en SagaOrchestrator:
+                           @Resource(lookup="java:/jms/queue/EvaluationResults")
+                           private Queue evaluationQueue;
+                        -->
+                        <admin-object
+                            class-name="com.rabbitmq.jms.admin.RMQDestination"
+                            jndi-name="java:/jms/queue/EvaluationResults"
+                            use-java-context="true"
+                            enabled="true">
+                            <config-property name="DestinationName">
+                                evaluation.results
+                            </config-property>
+                            <!-- QueueDurable=true: cola durable en RabbitMQ -->
+                            <config-property name="QueueDurable">true</config-property>
+                        </admin-object>
+                    </admin-objects>
+
+                </resource-adapter>
+            </resource-adapters>
+        </subsystem>
+
+        <!-- ══════════════════════════════════════════════════════
+             EJB — Pool de MDBs
+             ══════════════════════════════════════════════════════ -->
+        <subsystem xmlns="urn:jboss:domain:ejb3:9.0">
+            <mdb>
+                <!--
+                 Pool de instancias para los MDBs.
+                 max-pool-size controla cuántos mensajes se procesan en paralelo.
+                 Equivale a prefetch_count en pika.
+                -->
+                <resource-adapter-ref resource-adapter-name="rabbitmq-jms"/>
+                <bean-instance-pool-ref pool-name="mdb-strict-max-pool"/>
+            </mdb>
+            <pools>
+                <bean-instance-pools>
+                    <strict-max-pool name="mdb-strict-max-pool"
+                                     max-pool-size="20"
+                                     instance-acquisition-timeout="5"
+                                     instance-acquisition-timeout-unit="MINUTES"/>
+                </bean-instance-pools>
+            </pools>
+        </subsystem>
+
+    </profile>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SOCKET BINDINGS — Puertos de red
+         ══════════════════════════════════════════════════════════ -->
+    <socket-binding-group name="standard-sockets"
+                          default-interface="public"
+                          port-offset="${jboss.socket.binding.port-offset:0}">
+
+        <!-- Puerto HTTP de WildFly: http://localhost:8080/taller-distribuido/ -->
+        <socket-binding name="http" port="${jboss.http.port:8080}"/>
+
+        <!-- Puerto de administración: http://localhost:9990/console -->
+        <socket-binding name="management-http"
+                        interface="management"
+                        port="${jboss.management.http.port:9990}"/>
+
+        <!-- Destino SMTP para el mail session configurado arriba -->
+        <outbound-socket-binding name="mail-smtp">
+            <remote-destination host="smtp.gmail.com" port="587"/>
+        </outbound-socket-binding>
+
+    </socket-binding-group>
+
+</server>
