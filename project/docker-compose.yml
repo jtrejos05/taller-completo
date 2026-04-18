@@ -1,22 +1,6 @@
 version: '3.8'
 
-# ============================================================
-#  TALLER JAVA — Transacciones Distribuidas con Saga + WildFly
-#  Stack: WildFly 30 · Jakarta EE 10 · PostgreSQL 15 · RabbitMQ 3
-#
-#  Diferencias clave vs la versión Python:
-#    - El orchestrator y los MDBs corren en el MISMO contenedor WildFly
-#    - No hay contenedores separados para email_consumer ni device_notifier:
-#      son EJBs (MDBs) desplegados dentro del WAR en WildFly
-#    - standalone.xml configura datasources, mail y resource-adapter
-# ============================================================
-
 services:
-
-  # ----------------------------------------------------------
-  #  CAPA DE DATOS — Base de datos de Exámenes
-  #  PersistenceUnit: ExamPU | JNDI: java:/ExamDS
-  # ----------------------------------------------------------
   exam_db:
     image: postgres:15
     container_name: exam_db
@@ -36,10 +20,6 @@ services:
       interval: 10s
       retries: 5
 
-  # ----------------------------------------------------------
-  #  CAPA DE DATOS — Base de datos de Estudiantes
-  #  PersistenceUnit: StudentPU | JNDI: java:/StudentDS
-  # ----------------------------------------------------------
   student_db:
     image: postgres:15
     container_name: student_db
@@ -59,11 +39,6 @@ services:
       interval: 10s
       retries: 5
 
-  # ----------------------------------------------------------
-  #  MENSAJERÍA — RabbitMQ
-  #  Configurado en standalone.xml como resource-adapter AMQP.
-  #  Los MDBs se conectan vía el ConnectionFactory JNDI java:/jms/RabbitCF
-  # ----------------------------------------------------------
   rabbitmq:
     image: rabbitmq:3-management
     container_name: rabbitmq
@@ -72,7 +47,7 @@ services:
       RABBITMQ_DEFAULT_PASS: guest
     ports:
       - "5672:5672"
-      - "15672:15672"  # UI → http://localhost:15672
+      - "15672:15672"
     networks:
       - saga_network
     healthcheck:
@@ -80,39 +55,21 @@ services:
       interval: 15s
       retries: 5
 
-  # ----------------------------------------------------------
-  #  CAPA LÓGICA — WildFly 30 (Jakarta EE 10)
-  #
-  #  Contiene en un único WAR:
-  #    - SagaOrchestrator  (@Stateless EJB)
-  #    - EvaluacionResource (@Path JAX-RS)
-  #    - EmailConsumerMDB  (@MessageDriven)
-  #    - DeviceNotifierMDB (@MessageDriven)
-  #    - EstudianteService (@Stateless EJB)
-  #    - EmailService      (@Stateless EJB)
-  #
-  #  Puerto HTTP:       8080 → POST /taller-distribuido/api/evaluacion
-  #  Puerto Management: 9990 → http://localhost:9990/console
-  #
-  #  NOTA WILDFLY: En producción, WildFly se configuraría en modo
-  #  DOMAIN con un domain controller y múltiples host controllers
-  #  para alta disponibilidad y balanceo de carga.
-  # ----------------------------------------------------------
   wildfly:
     build:
       context: .
       dockerfile: Dockerfile.wildfly
     container_name: wildfly
     ports:
-      - "8080:8080"   # HTTP — endpoint REST
-      - "9990:9990"   # Management console
+      - "8080:8080"
+      - "9990:9990"
     environment:
-      # Leídas por standalone.xml vía ${env.VARIABLE}
       EXAM_DB_HOST: exam_db
       STUDENT_DB_HOST: student_db
       RABBIT_HOST: rabbitmq
+      RABBIT_USER: guest
+      RABBIT_PASSWORD: guest
       SMTP_APP_PASSWORD: ${SMTP_APP_PASSWORD}
-   
     depends_on:
       exam_db:
         condition: service_healthy
@@ -123,8 +80,7 @@ services:
     networks:
       - saga_network
     healthcheck:
-      test: ["CMD-SHELL",
-             "curl -f http://localhost:9990/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:9990/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5

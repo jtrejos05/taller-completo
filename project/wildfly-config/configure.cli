@@ -1,19 +1,23 @@
-# configure.cli — Configura WildFly 30 usando el CLI en modo embed
-# Sin resource-adapter: RabbitMQ se conecta via cliente AMQP nativo
+# configure.cli — WildFly 30 full
+# Versión estable para validar arranque del contenedor, datasources y mail
+# La parte del resource-adapter RabbitMQ se deja comentada temporalmente
+# hasta confirmar el nombre exacto del .rar y sus clases/config-property reales.
 
-embed-server --server-config=standalone.xml --std-out=echo
+embed-server --server-config=standalone-full.xml --std-out=echo
 
-# ══════════════════════════════════════════════════════════════
-#  SYSTEM PROPERTIES
-# ══════════════════════════════════════════════════════════════
+# =========================
+# System properties
+# =========================
 /system-property=exam.db.host:add(value="${env.EXAM_DB_HOST:exam_db}")
 /system-property=student.db.host:add(value="${env.STUDENT_DB_HOST:student_db}")
 /system-property=rabbit.host:add(value="${env.RABBIT_HOST:rabbitmq}")
+/system-property=rabbit.user:add(value="${env.RABBIT_USER:guest}")
+/system-property=rabbit.password:add(value="${env.RABBIT_PASSWORD:guest}")
 /system-property=smtp.password:add(value="${env.SMTP_APP_PASSWORD:changeme}")
 
-# ══════════════════════════════════════════════════════════════
-#  DRIVER PostgreSQL
-# ══════════════════════════════════════════════════════════════
+# =========================
+# PostgreSQL JDBC driver
+# =========================
 /subsystem=datasources/jdbc-driver=postgresql:add(\
     driver-name=postgresql,\
     driver-module-name=org.postgresql,\
@@ -21,9 +25,9 @@ embed-server --server-config=standalone.xml --std-out=echo
     driver-xa-datasource-class-name=org.postgresql.xa.PGXADataSource\
 )
 
-# ══════════════════════════════════════════════════════════════
-#  DATASOURCE — ExamDS (exam_db :5432)
-# ══════════════════════════════════════════════════════════════
+# =========================
+# Datasource: ExamDS
+# =========================
 data-source add \
     --name=ExamDS \
     --jndi-name=java:/ExamDS \
@@ -38,9 +42,9 @@ data-source add \
     --background-validation-millis=60000 \
     --check-valid-connection-sql="SELECT 1"
 
-# ══════════════════════════════════════════════════════════════
-#  DATASOURCE — StudentDS (student_db :5433)
-# ══════════════════════════════════════════════════════════════
+# =========================
+# Datasource: StudentDS
+# =========================
 data-source add \
     --name=StudentDS \
     --jndi-name=java:/StudentDS \
@@ -55,24 +59,43 @@ data-source add \
     --background-validation-millis=60000 \
     --check-valid-connection-sql="SELECT 1"
 
-# ══════════════════════════════════════════════════════════════
-#  MAIL SESSION — Gmail SMTP con STARTTLS
-# ══════════════════════════════════════════════════════════════
+# =========================
+# Mail
+# =========================
+# mail-smtp ya existe en standalone-full.xml, por eso solo se actualizan atributos
 /socket-binding-group=standard-sockets/remote-destination-outbound-socket-binding=mail-smtp:write-attribute(name=host, value=smtp.gmail.com)
 /socket-binding-group=standard-sockets/remote-destination-outbound-socket-binding=mail-smtp:write-attribute(name=port, value=587)
 
-/subsystem=mail/mail-session=default:write-attribute(name=jndi-name, value=java:jboss/mail/Default)
-
+/subsystem=mail/mail-session=default:write-attribute(name=jndi-name, value="java:jboss/mail/Default")
+/subsystem=mail/mail-session=default:write-attribute(name=from, value="noreply@universidad.co")
 /subsystem=mail/mail-session=default/server=smtp:write-attribute(name=outbound-socket-binding-ref, value=mail-smtp)
-/subsystem=mail/mail-session=default/server=smtp:write-attribute(name=ssl, value=false)
 /subsystem=mail/mail-session=default/server=smtp:write-attribute(name=tls, value=true)
-/subsystem=mail/mail-session=default/server=smtp:write-attribute(name=username, value=sistema@universidad.edu.co)
-/subsystem=mail/mail-session=default/server=smtp:write-attribute(name=password, value=${smtp.password})
+/subsystem=mail/mail-session=default/server=smtp:write-attribute(name=ssl, value=false)
 
-# ══════════════════════════════════════════════════════════════
-#  EJB pool
-# ══════════════════════════════════════════════════════════════
+# =========================
+# EJB / MDB pool
+# =========================
 /subsystem=ejb3/strict-max-bean-instance-pool=mdb-strict-max-pool:undefine-attribute(name=derive-size)
 /subsystem=ejb3/strict-max-bean-instance-pool=mdb-strict-max-pool:write-attribute(name=max-pool-size, value=20)
+
+# =========================
+# RabbitMQ resource adapter
+# =========================
+# TEMPORALMENTE DESACTIVADO
+# Este bloque se reactivará cuando confirmemos:
+# 1) nombre exacto del .rar desplegado
+# 2) class-name correcto del connection-definition
+# 3) config-property reales que soporta ese RAR
+#
+# Ejemplo conceptual (NO ACTIVAR AÚN):
+#
+# /subsystem=resource-adapters/resource-adapter=resource-adapter.rar:add(archive=resource-adapter.rar, transaction-support=NoTransaction)
+# /subsystem=resource-adapters/resource-adapter=resource-adapter.rar/connection-definitions=RabbitCF:add(\
+#     class-name=<CLASE_REAL_DEL_RAR>,\
+#     jndi-name=java:/jms/RabbitCF,\
+#     enabled=true,\
+#     use-java-context=true,\
+#     pool-name=RabbitCF\
+# )
 
 stop-embedded-server
