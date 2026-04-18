@@ -27,8 +27,8 @@ services:
     ports:
       - "5432:5432"
     volumes:
+      - ./sql/init_exam_db/init_exam_db.sql:/docker-entrypoint-initdb.d/init.sql
       - exam_data:/var/lib/postgresql/data
-      - ./sql/init_exam_db.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - saga_network
     healthcheck:
@@ -51,7 +51,7 @@ services:
       - "5433:5432"
     volumes:
       - student_data:/var/lib/postgresql/data
-      - ./sql/init_student_db.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./sql/init_student_db/init_student_db.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - saga_network
     healthcheck:
@@ -112,9 +112,7 @@ services:
       STUDENT_DB_HOST: student_db
       RABBIT_HOST: rabbitmq
       SMTP_APP_PASSWORD: ${SMTP_APP_PASSWORD}
-    volumes:
-      # standalone.xml personalizado con nuestros datasources
-      - ./wildfly-config/standalone.xml:/opt/jboss/wildfly/standalone/configuration/standalone.xml
+   
     depends_on:
       exam_db:
         condition: service_healthy

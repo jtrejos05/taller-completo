@@ -45,7 +45,7 @@ RUN mkdir -p /build/rar-content/META-INF && \
     printf '<?xml version="1.0" encoding="UTF-8"?>\n<connector xmlns="http://java.sun.com/xml/ns/j2ee" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://java.sun.com/xml/ns/j2ee http://java.sun.com/xml/ns/j2ee/connector_1_5.xsd" version="1.5">\n  <vendor-name>RabbitMQ</vendor-name>\n  <eis-type>JMS</eis-type>\n  <resourceadapter-version>2.11.0</resourceadapter-version>\n  <resourceadapter>\n    <resourceadapter-class>com.rabbitmq.jms.admin.RMQResourceAdapter</resourceadapter-class>\n    <outbound-resourceadapter>\n      <connection-definition>\n        <managedconnectionfactory-class>com.rabbitmq.jms.admin.RMQConnectionFactory</managedconnectionfactory-class>\n        <connectionfactory-interface>jakarta.jms.ConnectionFactory</connectionfactory-interface>\n        <connectionfactory-impl-class>com.rabbitmq.jms.admin.RMQConnectionFactory</connectionfactory-impl-class>\n        <connection-interface>jakarta.jms.Connection</connection-interface>\n        <connection-impl-class>com.rabbitmq.jms.client.RMQConnection</connection-impl-class>\n      </connection-definition>\n      <transaction-support>NoTransaction</transaction-support>\n      <reauthentication-support>false</reauthentication-support>\n    </outbound-resourceadapter>\n    <inbound-resourceadapter>\n      <messageadapter>\n        <messagelistener>\n          <messagelistener-type>jakarta.jms.MessageListener</messagelistener-type>\n          <activationspec>\n            <activationspec-class>com.rabbitmq.jms.admin.RMQActivationSpec</activationspec-class>\n          </activationspec>\n        </messagelistener>\n      </messageadapter>\n    </inbound-resourceadapter>\n  </resourceadapter>\n</connector>\n' > /build/rar-content/META-INF/ra.xml
 
 # Empaquetar como .rar (es un ZIP con otra extensión)
-RUN apt-get update -qq && apt-get install -y -qq zip && \
+RUN apt-get update -qq && apt-get install -y -qq zip xmlstarlet && \
     cd /build/rar-content && \
     zip -r /build/drivers/rabbitmq-jms.rar .
 
@@ -59,18 +59,37 @@ RUN mkdir -p /build/pg-module && \
 # ─────────────────────────────────────────────────────────────
 FROM quay.io/wildfly/wildfly:30.0.0.Final-jdk17
 
+# Variables de entorno con valores por defecto
+ENV EXAM_DB_HOST=exam_db \
+    STUDENT_DB_HOST=student_db \
+    RABBIT_HOST=rabbitmq \
+    SMTP_APP_PASSWORD=changeme
+
 COPY --from=builder --chown=jboss:root /build/pg-module/ \
      /opt/jboss/wildfly/modules/system/layers/base/org/postgresql/main/
 
 COPY --from=builder --chown=jboss:root /build/drivers/rabbitmq-jms.rar \
      /opt/jboss/wildfly/standalone/deployments/
 
-COPY --chown=jboss:root wildfly-config/standalone.xml \
-     /opt/jboss/wildfly/standalone/configuration/standalone.xml
-
 COPY --from=builder --chown=jboss:root \
      /build/target/taller-distribuido.war \
      /opt/jboss/wildfly/standalone/deployments/taller-distribuido.war
+
+# ─────────────────────────────────────────────────────────────
+#  PATCH del standalone.xml nativo de WildFly 30
+#
+#  En lugar de reemplazar el archivo completo (que requiere
+#  incluir todos los subsistemas base), usamos el CLI de
+#  WildFly en modo embed-server para agregar solo nuestra
+#  configuración encima del standalone.xml original.
+# ─────────────────────────────────────────────────────────────
+COPY --chown=jboss:root wildfly-config/configure.cli \
+     /opt/jboss/wildfly/configure.cli
+
+RUN /opt/jboss/wildfly/bin/jboss-cli.sh \
+      --file=/opt/jboss/wildfly/configure.cli && \
+    rm /opt/jboss/wildfly/configure.cli && \
+    rm -rf /opt/jboss/wildfly/standalone/configuration/standalone_xml_history
 
 RUN /opt/jboss/wildfly/bin/add-user.sh admin admin123 --silent
 
