@@ -1,11 +1,8 @@
 # ============================================================
-#  Dockerfile.wildfly — VERSIÓN CORREGIDA
-#  Construye rabbitmq-jms.rar desde el JAR + ra.xml generado
+#  Dockerfile.wildfly — WildFly 30, sin RAR de RabbitMQ
+#  RabbitMQ se conecta via cliente AMQP nativo (amqp-client)
 # ============================================================
 
-# ─────────────────────────────────────────────────────────────
-#  ETAPA 1: Build del WAR con Maven
-# ─────────────────────────────────────────────────────────────
 FROM maven:3.9.6-eclipse-temurin-17 AS builder
 
 WORKDIR /build
@@ -16,38 +13,11 @@ RUN mvn dependency:go-offline -B --no-transfer-progress
 COPY src/ ./src/
 RUN mvn clean package -DskipTests --no-transfer-progress
 
-# ─────────────────────────────────────────────────────────────
-#  ETAPA 1b: Descargar JARs y construir el RAR de RabbitMQ JMS
-# ─────────────────────────────────────────────────────────────
-
 # PostgreSQL JDBC
 RUN mvn dependency:copy \
       -Dartifact=org.postgresql:postgresql:42.7.3:jar \
       -DoutputDirectory=/build/drivers \
       --no-transfer-progress
-
-# rabbitmq-jms como JAR (no existe como RAR en Maven Central)
-RUN mvn dependency:copy \
-      -Dartifact=com.rabbitmq.jms:rabbitmq-jms:2.11.0:jar \
-      -DoutputDirectory=/build/rar-content \
-      --no-transfer-progress && \
-    mvn dependency:copy \
-      -Dartifact=com.rabbitmq:amqp-client:5.20.0:jar \
-      -DoutputDirectory=/build/rar-content \
-      --no-transfer-progress && \
-    mvn dependency:copy \
-      -Dartifact=org.slf4j:slf4j-api:1.7.36:jar \
-      -DoutputDirectory=/build/rar-content \
-      --no-transfer-progress
-
-# Crear META-INF/ra.xml
-RUN mkdir -p /build/rar-content/META-INF && \
-    printf '<?xml version="1.0" encoding="UTF-8"?>\n<connector xmlns="http://java.sun.com/xml/ns/j2ee" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://java.sun.com/xml/ns/j2ee http://java.sun.com/xml/ns/j2ee/connector_1_5.xsd" version="1.5">\n  <vendor-name>RabbitMQ</vendor-name>\n  <eis-type>JMS</eis-type>\n  <resourceadapter-version>2.11.0</resourceadapter-version>\n  <resourceadapter>\n    <resourceadapter-class>com.rabbitmq.jms.admin.RMQResourceAdapter</resourceadapter-class>\n    <outbound-resourceadapter>\n      <connection-definition>\n        <managedconnectionfactory-class>com.rabbitmq.jms.admin.RMQConnectionFactory</managedconnectionfactory-class>\n        <connectionfactory-interface>jakarta.jms.ConnectionFactory</connectionfactory-interface>\n        <connectionfactory-impl-class>com.rabbitmq.jms.admin.RMQConnectionFactory</connectionfactory-impl-class>\n        <connection-interface>jakarta.jms.Connection</connection-interface>\n        <connection-impl-class>com.rabbitmq.jms.client.RMQConnection</connection-impl-class>\n      </connection-definition>\n      <transaction-support>NoTransaction</transaction-support>\n      <reauthentication-support>false</reauthentication-support>\n    </outbound-resourceadapter>\n    <inbound-resourceadapter>\n      <messageadapter>\n        <messagelistener>\n          <messagelistener-type>jakarta.jms.MessageListener</messagelistener-type>\n          <activationspec>\n            <activationspec-class>com.rabbitmq.jms.admin.RMQActivationSpec</activationspec-class>\n          </activationspec>\n        </messagelistener>\n      </messageadapter>\n    </inbound-resourceadapter>\n  </resourceadapter>\n</connector>\n' > /build/rar-content/META-INF/ra.xml
-
-# Empaquetar como .rar (es un ZIP con otra extensión)
-RUN apt-get update -qq && apt-get install -y -qq zip xmlstarlet && \
-    cd /build/rar-content && \
-    zip -r /build/drivers/rabbitmq-jms.rar .
 
 # module.xml para PostgreSQL
 RUN mkdir -p /build/pg-module && \
@@ -59,7 +29,6 @@ RUN mkdir -p /build/pg-module && \
 # ─────────────────────────────────────────────────────────────
 FROM quay.io/wildfly/wildfly:30.0.0.Final-jdk17
 
-# Variables de entorno con valores por defecto
 ENV EXAM_DB_HOST=exam_db \
     STUDENT_DB_HOST=student_db \
     RABBIT_HOST=rabbitmq \
@@ -68,21 +37,10 @@ ENV EXAM_DB_HOST=exam_db \
 COPY --from=builder --chown=jboss:root /build/pg-module/ \
      /opt/jboss/wildfly/modules/system/layers/base/org/postgresql/main/
 
-COPY --from=builder --chown=jboss:root /build/drivers/rabbitmq-jms.rar \
-     /opt/jboss/wildfly/standalone/deployments/
-
 COPY --from=builder --chown=jboss:root \
      /build/target/taller-distribuido.war \
      /opt/jboss/wildfly/standalone/deployments/taller-distribuido.war
 
-# ─────────────────────────────────────────────────────────────
-#  PATCH del standalone.xml nativo de WildFly 30
-#
-#  En lugar de reemplazar el archivo completo (que requiere
-#  incluir todos los subsistemas base), usamos el CLI de
-#  WildFly en modo embed-server para agregar solo nuestra
-#  configuración encima del standalone.xml original.
-# ─────────────────────────────────────────────────────────────
 COPY --chown=jboss:root wildfly-config/configure.cli \
      /opt/jboss/wildfly/configure.cli
 
