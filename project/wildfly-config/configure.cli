@@ -1,11 +1,10 @@
 # configure.cli — Configura WildFly 30 usando el CLI en modo embed
-# Se ejecuta una sola vez durante el build del Docker image.
-# Agrega datasources, mail session y resource-adapter al standalone.xml nativo.
+# Sin resource-adapter: RabbitMQ se conecta via cliente AMQP nativo
 
 embed-server --server-config=standalone.xml --std-out=echo
 
 # ══════════════════════════════════════════════════════════════
-#  SYSTEM PROPERTIES — Variables de entorno con defaults
+#  SYSTEM PROPERTIES
 # ══════════════════════════════════════════════════════════════
 /system-property=exam.db.host:add(value="${env.EXAM_DB_HOST:exam_db}")
 /system-property=student.db.host:add(value="${env.STUDENT_DB_HOST:student_db}")
@@ -46,7 +45,7 @@ data-source add \
     --name=StudentDS \
     --jndi-name=java:/StudentDS \
     --driver-name=postgresql \
-    --connection-url=jdbc:postgresql://${student.db.host}:5433/student_db \
+    --connection-url=jdbc:postgresql://${student.db.host}:5432/student_db \
     --user-name=user \
     --password=password \
     --min-pool-size=5 \
@@ -58,8 +57,6 @@ data-source add \
 
 # ══════════════════════════════════════════════════════════════
 #  MAIL SESSION — Gmail SMTP con STARTTLS
-#  WildFly 30 ya trae mail-smtp y mail-session=default definidos,
-#  por eso usamos write-attribute en lugar de add.
 # ══════════════════════════════════════════════════════════════
 /socket-binding-group=standard-sockets/remote-destination-outbound-socket-binding=mail-smtp:write-attribute(name=host, value=smtp.gmail.com)
 /socket-binding-group=standard-sockets/remote-destination-outbound-socket-binding=mail-smtp:write-attribute(name=port, value=587)
@@ -73,39 +70,7 @@ data-source add \
 /subsystem=mail/mail-session=default/server=smtp:write-attribute(name=password, value=${smtp.password})
 
 # ══════════════════════════════════════════════════════════════
-#  RESOURCE ADAPTER — RabbitMQ JMS
-# ══════════════════════════════════════════════════════════════
-/subsystem=resource-adapters/resource-adapter=rabbitmq-jms:add(\
-    archive=rabbitmq-jms.rar,\
-    transaction-support=NoTransaction\
-)
-
-/subsystem=resource-adapters/resource-adapter=rabbitmq-jms/connection-definitions=RabbitCF:add(\
-    class-name=com.rabbitmq.jms.admin.RMQConnectionFactory,\
-    jndi-name=java:/jms/RabbitCF,\
-    enabled=true,\
-    use-java-context=true\
-)
-
-/subsystem=resource-adapters/resource-adapter=rabbitmq-jms/connection-definitions=RabbitCF/config-properties=Host:add(value=${rabbit.host})
-/subsystem=resource-adapters/resource-adapter=rabbitmq-jms/connection-definitions=RabbitCF/config-properties=Port:add(value=5672)
-/subsystem=resource-adapters/resource-adapter=rabbitmq-jms/connection-definitions=RabbitCF/config-properties=Username:add(value=guest)
-/subsystem=resource-adapters/resource-adapter=rabbitmq-jms/connection-definitions=RabbitCF/config-properties=Password:add(value=guest)
-
-/subsystem=resource-adapters/resource-adapter=rabbitmq-jms/admin-objects=EvaluationResultsQueue:add(\
-    class-name=com.rabbitmq.jms.admin.RMQDestination,\
-    jndi-name=java:/jms/queue/EvaluationResults,\
-    use-java-context=true,\
-    enabled=true\
-)
-
-/subsystem=resource-adapters/resource-adapter=rabbitmq-jms/admin-objects=EvaluationResultsQueue/config-properties=DestinationName:add(value=evaluation.results)
-/subsystem=resource-adapters/resource-adapter=rabbitmq-jms/admin-objects=EvaluationResultsQueue/config-properties=QueueDurable:add(value=true)
-
-# ══════════════════════════════════════════════════════════════
-#  EJB — Pool de MDBs
-#  WildFly 30 usa derive-size por defecto; hay que quitarlo
-#  antes de poder definir max-pool-size manualmente.
+#  EJB pool
 # ══════════════════════════════════════════════════════════════
 /subsystem=ejb3/strict-max-bean-instance-pool=mdb-strict-max-pool:undefine-attribute(name=derive-size)
 /subsystem=ejb3/strict-max-bean-instance-pool=mdb-strict-max-pool:write-attribute(name=max-pool-size, value=20)
