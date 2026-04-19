@@ -1,8 +1,8 @@
-package co.universidad.taller.rest;
+package co.universidad.taller;
 
 import co.universidad.taller.model.EvaluacionPayload;
 import co.universidad.taller.saga.SagaException;
-import co.universidad.taller.saga.SagaOrchestrator;
+import co.universidad.taller.SagaOrchestrator;
 import jakarta.ejb.EJB;
 import jakarta.validation.Valid;
 import jakarta.ws.rs.*;
