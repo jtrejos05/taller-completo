@@ -22,7 +22,7 @@ public class EmailService {
                                 String examId, double puntaje) {
         try {
             MimeMessage msg = new MimeMessage(mailSession);
-            msg.setFrom(new InternetAddress("noreply@universidad.co"));
+            msg.setFrom(new InternetAddress("juantrev05@gmail.com"));
             msg.setRecipient(Message.RecipientType.TO, new InternetAddress(destinatario));
             msg.setSubject("Resultado de tu evaluación: " + examId);
             msg.setText(String.format(
