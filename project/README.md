@@ -79,10 +79,71 @@ Si algún paso falla, la Saga ejecuta compensaciones en orden inverso:
 ```
 FALLO en PASO 2
     │
+    ├─► Compensar PASO 2: DELETE Grade de student_db
     ├─► Compensar PASO 1: DELETE ExamSubmission de exam_db
     │
     └─► Registrar estado COMPENSATED en saga_executions
+         (o COMPENSATION_FAILED si la compensación también falla)
 ```
+
+#### Diagrama completo de flujo y compensación
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  FLUJO PRINCIPAL (Happy Path)     │   FLUJO DE COMPENSACIÓN             │
+├───────────────────────────────────┼─────────────────────────────────────┤
+│                                   │                                     │
+│  Cliente HTTP                     │   Fallo en cualquier paso           │
+│       │                           │          │                          │
+│       ▼                           │          ▼                          │
+│  EvaluacionResource               │   Compensar paso 2                  │
+│  POST /api/evaluacion             │   DELETE grades              ◄──┐   │
+│       │                           │          │                     │   │
+│       ▼                           │          ▼                     │   │
+│  SagaOrchestrator                 │   Compensar paso 1             │   │
+│  @TransactionAttribute            │   DELETE exam_submissions      │   │
+│  (NOT_SUPPORTED)                  │          │                     │   │
+│       │                           │     ┌────┴────┐                │   │
+│       ▼                           │     ▼         ▼                │   │
+│  PASO 1 — exam_db ──────────────► │─ falla   exitoso               │   │
+│  INSERT exam_submissions          │     │         │                 │   │
+│  REQUIRES_NEW → COMMIT            │     ▼         ▼                │   │
+│       │                           │  COMPENSATION  COMPENSATED     │   │
+│       ▼                           │  _FAILED       (saga_log)      │   │
+│  PASO 2 — student_db ───────────► │─ intervención                  │   │
+│  INSERT grades                    │   manual       │                │   │
+│  REQUIRES_NEW → COMMIT            │                ▼                │   │
+│       │                           │         HTTP 500               │   │
+│       ▼                           │         Saga fallida           │   │
+│  PASO 3 — JMS/Artemis             │                                 │   │
+│  PUBLISH EvaluationResults ─────► │─ si falla ──────────────────────┘   │
+│  NOT_SUPPORTED                    │                                     │
+│       │                           │                                     │
+│       ▼                           │                                     │
+│  HTTP 200 OK ← cliente recibe     │                                     │
+│  respuesta inmediata              │                                     │
+│       │ (asíncrono)               │                                     │
+│       ▼                           │                                     │
+│  EmailConsumerMDB                 │                                     │
+│  MDB — ACK automático             │                                     │
+│       │                           │                                     │
+│       ▼                           │                                     │
+│  Email enviado al estudiante      │                                     │
+│                                   │                                     │
+└───────────────────────────────────┴─────────────────────────────────────┘
+```
+
+**Estados posibles en `saga_executions`:**
+
+| Estado | Descripción |
+|--------|-------------|
+| `STARTED` | La Saga comenzó a ejecutarse |
+| `STEP1_OK` | ExamSubmission guardada exitosamente |
+| `STEP2_OK` | Grade guardada exitosamente |
+| `STEP3_OK` | Evento publicado en JMS — Saga completa |
+| `STEP2_FAILED` | Falló algún paso — compensación en curso |
+| `COMPENSATED` | Rollback distribuido exitoso |
+| `COMPENSATION_FAILED` | La compensación también falló — requiere intervención manual |
 
 ---
 
